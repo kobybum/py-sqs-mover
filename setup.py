@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="sqs_mover",
-    version="0.0.2",
+    version="0.0.3",
     author="Koby Bass",
     description="Utility for moving message between SQS queues",
     url="https://github.com/kobybum/py-sqs-mover",
