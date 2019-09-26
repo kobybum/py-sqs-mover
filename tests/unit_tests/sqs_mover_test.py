@@ -7,7 +7,6 @@ from sqs_mover.sqs_mover import (
     delete_messages,
     move_messages,
     Message,
-    get_approximate_queue_size,
     MESSAGE_BATCH_SIZE,
 )
 
