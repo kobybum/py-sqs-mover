@@ -88,8 +88,8 @@ def get_approximate_queue_size(sqs_client, queue_url: str) -> str:
     return queue_attributes["Attributes"]["ApproximateNumberOfMessages"]
 
 
-def move_messages(source_queue_name: str, dest_queue_name: str):
-    sqs_client = boto3.client("sqs")
+def move_messages(source_queue_name: str, dest_queue_name: str, sqs_client=None):
+    sqs_client = sqs_client or boto3.client("sqs")
 
     source_url = get_queue_url(sqs_client, source_queue_name)
     dest_url = get_queue_url(sqs_client, dest_queue_name)
@@ -128,11 +128,14 @@ def move_messages(source_queue_name: str, dest_queue_name: str):
     logger.info("Moved %d total messages", messages_moved)
 
 
-def run_from_cli():
+def setup_logging():
     logging.getLogger("botocore").setLevel("WARNING")
     logging.getLogger("urllib3").setLevel("WARNING")
     logging.basicConfig(format="%(asctime)s %(name)s - %(message)s", level=logging.DEBUG)
 
+
+def run_from_cli():
+    setup_logging()
     parser = argparse.ArgumentParser(description="Move messages between SQS queues.")
     parser.add_argument("-s", "--source", help="Source queue name", required=True)
     parser.add_argument("-d", "--dest", help="Destination queue name", required=True)
