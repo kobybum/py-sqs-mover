@@ -1,4 +1,3 @@
-
 from unittest.mock import Mock, patch, call
 
 from sqs_mover.sqs_mover import (
@@ -33,7 +32,7 @@ def test_get_messages_returns_messages():
 
     messages = get_messages(sqs_client, "my-queue")
 
-    assert messages == (Message(1, "message", attributes, "1234"), )
+    assert messages == (Message(1, "message", attributes, "1234"),)
 
     sqs_client.receive_message.assert_called_once_with(
         QueueUrl="my-queue", MaxNumberOfMessages=MESSAGE_BATCH_SIZE, MessageAttributeNames=["All"]
@@ -54,18 +53,12 @@ def test_get_messages_supports_empty_attributes():
     sqs_client = Mock()
 
     sqs_client.receive_message.return_value = {
-        "Messages": [
-            {
-                "MessageId": 1,
-                "Body": "message",
-                "ReceiptHandle": "1234",
-            }
-        ]
+        "Messages": [{"MessageId": 1, "Body": "message", "ReceiptHandle": "1234"}]
     }
 
     messages = get_messages(sqs_client, "my-queue")
 
-    assert messages == (Message(1, "message", {}, "1234"), )
+    assert messages == (Message(1, "message", {}, "1234"),)
 
 
 def test_send_messagse_sends_messages():
@@ -73,10 +66,10 @@ def test_send_messagse_sends_messages():
 
     sqs_client.send_message_batch.return_value = {}
 
-    failed_messages = send_messages(sqs_client, "my-queue", (Message(1, "message", {}, "1234"), ))
+    failed_messages = send_messages(sqs_client, "my-queue", (Message(1, "message", {}, "1234"),))
 
     sqs_client.send_message_batch.assert_called_once_with(
-        QueueUrl='my-queue', Entries=[{'Id': 1, 'MessageBody': 'message', 'MessageAttributes': {}}],
+        QueueUrl="my-queue", Entries=[{"Id": 1, "MessageBody": "message", "MessageAttributes": {}}]
     )
 
     assert failed_messages == tuple()
@@ -85,13 +78,9 @@ def test_send_messagse_sends_messages():
 def test_send_messagse_returns_failed_messages():
     sqs_client = Mock()
 
-    sqs_client.send_message_batch.return_value = {
-        "Failed": [{
-            "MessageId": 2
-        }]
-    }
+    sqs_client.send_message_batch.return_value = {"Failed": [{"MessageId": 2}]}
 
-    messages = (Message(1, "message", {}, "1234"), Message(2, "another", {}, "5678"), )
+    messages = (Message(1, "message", {}, "1234"), Message(2, "another", {}, "5678"))
 
     failed_messages = send_messages(sqs_client, "my-queue", messages)
     assert failed_messages == messages[1:]
@@ -102,10 +91,10 @@ def test_delete_messages_deletes_messages():
 
     sqs_client.delete_message_batch.return_value = {}
 
-    failed_messages = delete_messages(sqs_client, "my-queue", (Message(1, "message", {}, "1234"), ))
+    failed_messages = delete_messages(sqs_client, "my-queue", (Message(1, "message", {}, "1234"),))
 
     sqs_client.delete_message_batch.assert_called_once_with(
-        QueueUrl='my-queue', Entries=[{'Id': 1, 'ReceiptHandle': '1234'}],
+        QueueUrl="my-queue", Entries=[{"Id": 1, "ReceiptHandle": "1234"}]
     )
 
     assert failed_messages == tuple()
@@ -114,17 +103,14 @@ def test_delete_messages_deletes_messages():
 def test_delete_messages_returns_failed_messages():
     sqs_client = Mock()
 
-    sqs_client.delete_message_batch.return_value = {
-        "Failed": [{
-            "MessageId": 2
-        }]
-    }
+    sqs_client.delete_message_batch.return_value = {"Failed": [{"MessageId": 2}]}
 
-    messages = (Message(1, "message", {}, "1234"), Message(2, "another", {}, "5678"), )
+    messages = (Message(1, "message", {}, "1234"), Message(2, "another", {}, "5678"))
     failed_messages = delete_messages(sqs_client, "my-queue", messages)
 
     sqs_client.delete_message_batch.assert_called_once_with(
-        QueueUrl='my-queue', Entries=[{'Id': 1, 'ReceiptHandle': '1234',}, {'Id': 2, 'ReceiptHandle': '5678',}],
+        QueueUrl="my-queue",
+        Entries=[{"Id": 1, "ReceiptHandle": "1234"}, {"Id": 2, "ReceiptHandle": "5678"}],
     )
 
     assert failed_messages == tuple(messages[1:])
@@ -153,6 +139,12 @@ def test_move_messages_moves_in_bulks(get_queue_url, get_messages, send_messages
     move_messages("source", "dest", sqs_client=sqs_client)
 
     assert get_queue_url.call_args_list == [call(sqs_client, "source"), call(sqs_client, "dest")]
-    assert get_messages.call_args_list == [call(sqs_client, "http://source"), ] * 3
-    assert send_messages.call_args_list == [call(sqs_client, "http://dest", batches[0]), call(sqs_client, "http://dest", batches[1])]
-    assert delete_messages.call_args_list == [call(sqs_client, "http://source", batches[0]), call(sqs_client, "http://source", batches[1])]
+    assert get_messages.call_args_list == [call(sqs_client, "http://source")] * 3
+    assert send_messages.call_args_list == [
+        call(sqs_client, "http://dest", batches[0]),
+        call(sqs_client, "http://dest", batches[1]),
+    ]
+    assert delete_messages.call_args_list == [
+        call(sqs_client, "http://source", batches[0]),
+        call(sqs_client, "http://source", batches[1]),
+    ]

@@ -1,7 +1,8 @@
 
-lint:
+test-and-lint:
+	@pytest
 	@mypy --ignore-missing-imports .
 	@black --check -l 100 .
 
-test:
-	@pytest
+format-code:
+	@black -l 100 .
