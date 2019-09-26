@@ -1,0 +1,19 @@
+language: python
+python:
+- '3.6'
+- '3.7'
+
+install: pip install -r requirements.txt -r requirements-dev.txt
+script: make test-and-lint
+
+jobs:
+  include:
+    - stage: deploy
+      deploy:
+        provider: pypi
+        python: '3.6'
+        user: kobybum
+        password:
+          secure: m9hKV52Fs1FtzxsQN+l+6DO3NaWhsKx8C3lEllKGRSjht3aySwYCb+wmX/jZLUIBP9Wa+r85JiUz7x2EBEvVUnZ0Z8jkb0cAdVo9mVM/TQfAjITRePv/tiQFl6PFKQB2Qyp6/rtNLrfriV1TjivcrEyoJkisqwRYj/7BcobU7SfquAWM20SNNKsCMjcVLbB31yuydqotP0RxG1gzLYz9nnt721NmElaOEU3iBVMfLhfsNCFZcqKF3qawO0x1qeF8G/pHM2FzwZelCp0O+zuMHdd+mfyZXK8yVw7RyD4MfDpUXHDPEDDkH5DZo9N/zorc1BLm006h5IJCMYQoFcq8BViAvPRN9yfwArnRwAKr5vMG0ahXShYeFquQNb0/dKTq8vvB62e4nMknVkfmY6xlpGzyPxTIbPAJAKgChlFAiwkYnAYfoQLw/S5p+X1ZOz/pTqfZqUC1ElP/kiAg32CRD+Hl9YD+3WrwQa6WGQYxh17VTqLoEWmU8GsGN8cTwJyanjylQVwCzYf0Ukn+k54wvmHNbhRCCsILxjf7tIPfoztZFFD0+soYXA4O4/z4l7nijH8IrbTvoCnDLNT9cb1cvounl9xjJnWCpCtq5RxQCIh4GoJsIblgH8VZBZ7FsZwZLSOxRGlhcaZ19NDKXEPrjMEeOCLFSS3ds0fLQL28jWQ=
+        on:
+          branch: release

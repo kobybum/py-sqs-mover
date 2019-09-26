@@ -1,5 +1,7 @@
 # Python SQS Mover
 
+[![Build Status](https://travis-ci.org/kobybum/py-sqs-mover.svg?branch=master)](https://travis-ci.org/kobybum/py-sqs-mover)
+
 ## Use Case
 
 Copying messages between SQS queues. Useful when retrying messages from a DLQ.
