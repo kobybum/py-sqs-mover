@@ -4,8 +4,7 @@ import logging
 import argparse
 import boto3
 
-from threading import Event
-from typing import Dict, Tuple, NamedTuple, Sequence, Optional
+from typing import Dict, Tuple, NamedTuple, Optional
 
 
 class Message(NamedTuple):
