@@ -24,6 +24,9 @@ If you'd like to run using a specific AWS profile, you can set the `AWS_PROFILE`
 AWS_PROFILE=production AWS_DEFAULT_REGION=us-west-2 sqsmover -s <source_queue_name> -d <destination_queue_name>
 ```
 
+If you'd like to poll messages without moving, use `-p` flag:
+`sqsmover -s <source_queue_name> -p`
+
 ## Contributing
 
 Contributions are always welcome.

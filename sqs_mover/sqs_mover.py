@@ -3,6 +3,7 @@
 import logging
 import argparse
 import boto3
+import json
 
 from typing import Dict, Tuple, NamedTuple, Optional
 
@@ -127,6 +128,17 @@ def move_messages(source_queue_name: str, dest_queue_name: str, sqs_client=None)
     logger.info("Moved %d total messages", messages_moved)
 
 
+def poll_messages(source_queue_name: str, sqs_client=None):
+    sqs_client = sqs_client or boto3.client("sqs")
+    source_url = get_queue_url(sqs_client, source_queue_name)
+    while True:
+        messages = get_messages(sqs_client, source_url)
+        if not messages:
+            break
+
+        logger.info("Messages: %s", json.dumps(messages, indent=4))
+
+
 def setup_logging():
     logging.getLogger("botocore").setLevel("WARNING")
     logging.getLogger("urllib3").setLevel("WARNING")
@@ -136,12 +148,23 @@ def setup_logging():
 def run_from_cli():
     setup_logging()
     parser = argparse.ArgumentParser(description="Move messages between SQS queues.")
+    parser.add_argument(
+        "-p",
+        "--poll",
+        help="Poll messages from the source queue without moving.",
+        action="store_true",
+    )
     parser.add_argument("-s", "--source", help="Source queue name", required=True)
-    parser.add_argument("-d", "--dest", help="Destination queue name", required=True)
+    parser.add_argument("-d", "--dest", help="Destination queue name", required=False)
 
     args = parser.parse_args()
 
-    move_messages(args.source, args.dest)
+    if args.poll:
+        poll_messages(args.source)
+    else:
+        if not args.dest:
+            parser.error("-d argument is required if not polling")
+        move_messages(args.source, args.dest)
 
 
 if __name__ == "__main__":
