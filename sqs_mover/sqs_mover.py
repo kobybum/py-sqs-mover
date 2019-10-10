@@ -18,7 +18,6 @@ class Message(NamedTuple):
 Messages = Tuple[Message, ...]
 
 
-
 logger = logging.getLogger("sqs_mover")
 
 
@@ -87,7 +86,9 @@ def get_approximate_queue_size(sqs_client, queue_url: str) -> str:
     return queue_attributes["Attributes"]["ApproximateNumberOfMessages"]
 
 
-def move_messages(source_queue_name: str, dest_queue_name: str, message_batch_size: int, sqs_client=None):
+def move_messages(
+    source_queue_name: str, dest_queue_name: str, message_batch_size: int, sqs_client=None
+):
     sqs_client = sqs_client or boto3.client("sqs")
 
     source_url = get_queue_url(sqs_client, source_queue_name)
@@ -138,7 +139,7 @@ def poll_messages(source_queue_name: str, message_batch_size: int, sqs_client=No
         logger.info("Messages: %s", json.dumps(messages, indent=4))
 
 
-def setup_logging(verbose:bool = False):
+def setup_logging(verbose: bool = False):
     logging.getLogger("botocore").setLevel("WARNING")
     logging.getLogger("urllib3").setLevel("WARNING")
     if verbose:
@@ -157,8 +158,19 @@ def run_from_cli():
     )
     parser.add_argument("-s", "--source", help="Source queue name", required=True)
     parser.add_argument("-d", "--dest", help="Destination queue name", required=False)
-    parser.add_argument("-b", "--batch", help="The number of messages to request each iteration", required=False, default=1)
-    parser.add_argument("-v", "--verbose", help="print the contents of the messages as they are being moved", required=False)
+    parser.add_argument(
+        "-b",
+        "--batch",
+        help="The number of messages to request each iteration",
+        required=False,
+        default=1,
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        help="print the contents of the messages as they are being moved",
+        required=False,
+    )
 
     args = parser.parse_args()
     if args.verbose:
