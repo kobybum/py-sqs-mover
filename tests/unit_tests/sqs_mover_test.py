@@ -7,7 +7,6 @@ from sqs_mover.sqs_mover import (
     delete_messages,
     move_messages,
     Message,
-    MESSAGE_BATCH_SIZE,
 )
 
 
@@ -29,12 +28,12 @@ def test_get_messages_returns_messages():
         ]
     }
 
-    messages = get_messages(sqs_client, "my-queue")
+    messages = get_messages(sqs_client, "my-queue", 1)
 
     assert messages == (Message(1, "message", attributes, "1234"),)
 
     sqs_client.receive_message.assert_called_once_with(
-        QueueUrl="my-queue", MaxNumberOfMessages=MESSAGE_BATCH_SIZE, MessageAttributeNames=["All"]
+        QueueUrl="my-queue", MaxNumberOfMessages=1, MessageAttributeNames=["All"]
     )
 
 
@@ -43,7 +42,7 @@ def test_get_messages_supports_empty_response():
 
     sqs_client.receive_message.return_value = {}
 
-    messages = get_messages(sqs_client, "my-queue")
+    messages = get_messages(sqs_client, "my-queue", 1)
 
     assert messages == tuple()
 
@@ -55,7 +54,7 @@ def test_get_messages_supports_empty_attributes():
         "Messages": [{"MessageId": 1, "Body": "message", "ReceiptHandle": "1234"}]
     }
 
-    messages = get_messages(sqs_client, "my-queue")
+    messages = get_messages(sqs_client, "my-queue", 1)
 
     assert messages == (Message(1, "message", {}, "1234"),)
 
@@ -135,10 +134,10 @@ def test_move_messages_moves_in_bulks(get_queue_url, get_messages, send_messages
     get_queue_url.side_effect = _get_queue_url
     get_messages.side_effect = batches
 
-    move_messages("source", "dest", sqs_client=sqs_client)
+    move_messages("source", "dest", 1, sqs_client=sqs_client)
 
     assert get_queue_url.call_args_list == [call(sqs_client, "source"), call(sqs_client, "dest")]
-    assert get_messages.call_args_list == [call(sqs_client, "http://source")] * 3
+    assert get_messages.call_args_list == [call(sqs_client, "http://source", 1)] * 3
     assert send_messages.call_args_list == [
         call(sqs_client, "http://dest", batches[0]),
         call(sqs_client, "http://dest", batches[1]),
