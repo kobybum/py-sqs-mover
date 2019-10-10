@@ -136,7 +136,8 @@ def poll_messages(source_queue_name: str, message_batch_size: int, sqs_client=No
         if not messages:
             break
 
-        logger.info("Messages: %s", json.dumps(messages, indent=4))
+        message_bodies = [message.body for message in messages]
+        logger.info("Messages: %s", json.dumps(message_bodies, indent=4))
 
 
 def setup_logging(verbose: bool = False):
@@ -161,9 +162,9 @@ def run_from_cli():
     parser.add_argument(
         "-b",
         "--batch",
-        help="The number of messages to request each iteration",
+        help="The number of messages to request each iteration, 10 maximum",
         required=False,
-        default=1,
+        default=10,
     )
     parser.add_argument(
         "-v",
