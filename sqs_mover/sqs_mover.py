@@ -18,8 +18,6 @@ class Message(NamedTuple):
 Messages = Tuple[Message, ...]
 
 
-MESSAGE_BATCH_SIZE = 1
-
 logger = logging.getLogger("sqs_mover")
 
 
@@ -27,9 +25,9 @@ def get_queue_url(sqs_client, queue_name: str) -> str:
     return sqs_client.get_queue_url(QueueName=queue_name)["QueueUrl"]
 
 
-def get_messages(sqs_client, queue_url: str) -> Messages:
+def get_messages(sqs_client, queue_url: str, message_batch_size: int) -> Messages:
     raw_messages = sqs_client.receive_message(
-        QueueUrl=queue_url, MaxNumberOfMessages=MESSAGE_BATCH_SIZE, MessageAttributeNames=["All"]
+        QueueUrl=queue_url, MaxNumberOfMessages=message_batch_size, MessageAttributeNames=["All"]
     ).get("Messages")
 
     if not raw_messages:
@@ -56,7 +54,7 @@ def send_messages(sqs_client, queue_url: str, messages: Messages) -> Messages:
         for message in messages
     ]
 
-    logger.info("Sending: %s", send_entries)
+    logger.debug("Sending: %s", send_entries)
 
     send_response = sqs_client.send_message_batch(QueueUrl=queue_url, Entries=send_entries)
 
@@ -88,7 +86,9 @@ def get_approximate_queue_size(sqs_client, queue_url: str) -> str:
     return queue_attributes["Attributes"]["ApproximateNumberOfMessages"]
 
 
-def move_messages(source_queue_name: str, dest_queue_name: str, sqs_client=None):
+def move_messages(
+    source_queue_name: str, dest_queue_name: str, message_batch_size: int, sqs_client=None
+):
     sqs_client = sqs_client or boto3.client("sqs")
 
     source_url = get_queue_url(sqs_client, source_queue_name)
@@ -104,7 +104,7 @@ def move_messages(source_queue_name: str, dest_queue_name: str, sqs_client=None)
     messages_moved = 0
     i = 0
     while True:
-        messages = get_messages(sqs_client, source_url)
+        messages = get_messages(sqs_client, source_url, message_batch_size)
         if not messages:
             break
 
@@ -128,25 +128,27 @@ def move_messages(source_queue_name: str, dest_queue_name: str, sqs_client=None)
     logger.info("Moved %d total messages", messages_moved)
 
 
-def poll_messages(source_queue_name: str, sqs_client=None):
+def poll_messages(source_queue_name: str, message_batch_size: int, sqs_client=None):
     sqs_client = sqs_client or boto3.client("sqs")
     source_url = get_queue_url(sqs_client, source_queue_name)
     while True:
-        messages = get_messages(sqs_client, source_url)
+        messages = get_messages(sqs_client, source_url, message_batch_size)
         if not messages:
             break
 
         logger.info("Messages: %s", json.dumps(messages, indent=4))
 
 
-def setup_logging():
+def setup_logging(verbose: bool = False):
     logging.getLogger("botocore").setLevel("WARNING")
     logging.getLogger("urllib3").setLevel("WARNING")
-    logging.basicConfig(format="%(asctime)s %(name)s - %(message)s", level=logging.DEBUG)
+    if verbose:
+        logging.basicConfig(format="%(asctime)s %(name)s - %(message)s", level=logging.DEBUG)
+    else:
+        logging.basicConfig(format="%(asctime)s %(name)s - %(message)s", level=logging.INFO)
 
 
 def run_from_cli():
-    setup_logging()
     parser = argparse.ArgumentParser(description="Move messages between SQS queues.")
     parser.add_argument(
         "-p",
@@ -156,15 +158,31 @@ def run_from_cli():
     )
     parser.add_argument("-s", "--source", help="Source queue name", required=True)
     parser.add_argument("-d", "--dest", help="Destination queue name", required=False)
+    parser.add_argument(
+        "-b",
+        "--batch",
+        help="The number of messages to request each iteration",
+        required=False,
+        default=1,
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        help="print the contents of the messages as they are being moved",
+        required=False,
+    )
 
     args = parser.parse_args()
-
+    if args.verbose:
+        setup_logging(verbose=True)
+    else:
+        setup_logging()
     if args.poll:
-        poll_messages(args.source)
+        poll_messages(args.source, args.batch)
     else:
         if not args.dest:
             parser.error("-d argument is required if not polling")
-        move_messages(args.source, args.dest)
+        move_messages(args.source, args.dest, args.batch)
 
 
 if __name__ == "__main__":
