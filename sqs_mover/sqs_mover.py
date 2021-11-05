@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import logging
 import argparse
 import boto3
@@ -17,7 +15,6 @@ class Message(NamedTuple):
 
 Messages = Tuple[Message, ...]
 
-
 logger = logging.getLogger("sqs_mover")
 
 
@@ -26,22 +23,26 @@ def get_queue_url(sqs_client, queue_name: str) -> str:
 
 
 def get_messages(sqs_client, queue_url: str, message_batch_size: int) -> Messages:
-    raw_messages = sqs_client.receive_message(
-        QueueUrl=queue_url, MaxNumberOfMessages=message_batch_size, MessageAttributeNames=["All"]
-    ).get("Messages")
+    if message_batch_size > 0:
+        raw_messages = sqs_client.receive_message(
+            QueueUrl=queue_url,
+            MaxNumberOfMessages=message_batch_size,
+            MessageAttributeNames=["All"],
+        ).get("Messages")
 
-    if not raw_messages:
-        return tuple()
+        if not raw_messages:
+            return tuple()
 
-    return tuple(
-        Message(
-            message_id=raw_message["MessageId"],
-            body=raw_message["Body"],
-            attributes=raw_message.get("MessageAttributes", {}),
-            receipt_handle=raw_message["ReceiptHandle"],
+        return tuple(
+            Message(
+                message_id=raw_message["MessageId"],
+                body=raw_message["Body"],
+                attributes=raw_message.get("MessageAttributes", {}),
+                receipt_handle=raw_message["ReceiptHandle"],
+            )
+            for raw_message in raw_messages
         )
-        for raw_message in raw_messages
-    )
+    return tuple()
 
 
 def send_messages(sqs_client, queue_url: str, messages: Messages) -> Messages:
@@ -87,7 +88,11 @@ def get_approximate_queue_size(sqs_client, queue_url: str) -> str:
 
 
 def move_messages(
-    source_queue_name: str, dest_queue_name: str, message_batch_size: int, sqs_client=None
+    source_queue_name: str,
+    dest_queue_name: str,
+    message_batch_size: int,
+    message_limit=None,
+    sqs_client=None,
 ):
     sqs_client = sqs_client or boto3.client("sqs")
 
@@ -97,14 +102,27 @@ def move_messages(
     total_messages = get_approximate_queue_size(sqs_client, source_url)
 
     logger.info(
-        "Moving %s messages from %s to %s", total_messages, source_queue_name, dest_queue_name
+        "Approximately %s messages are in %s ", total_messages, source_queue_name
     )
 
     messages = None
     messages_moved = 0
-    i = 0
+    # In every 10 iteration, check for messages left in queue and log.
+    iteration = 0
     while True:
-        messages = get_messages(sqs_client, source_url, message_batch_size)
+        effective_limit = None
+        if message_limit is not None:
+            effective_limit = message_limit - messages_moved
+
+        effective_batch_size = (
+            message_batch_size
+            if effective_limit is None
+            else effective_limit
+            if effective_limit < message_batch_size
+            else message_batch_size
+        )
+
+        messages = get_messages(sqs_client, source_url, effective_batch_size)
         if not messages:
             break
 
@@ -118,26 +136,43 @@ def move_messages(
         if failed_deletions:
             return
 
-        i += 1
+        iteration += 1
         messages_moved += len(messages)
 
-        if i % 10 == 0:
+        if iteration % 10 == 0:
             total_messages = get_approximate_queue_size(sqs_client, source_url)
             logger.info("Moved %d messages, approximately %s left", messages_moved, total_messages)
 
-    logger.info("Moved %d total messages", messages_moved)
+    logger.info("Moved total %d message(s)", messages_moved)
 
 
-def poll_messages(source_queue_name: str, message_batch_size: int, sqs_client=None):
+def poll_messages(
+    source_queue_name: str, message_batch_size: int, message_limit=None, sqs_client=None
+):
     sqs_client = sqs_client or boto3.client("sqs")
     source_url = get_queue_url(sqs_client, source_queue_name)
+    processed_messages = 0
     while True:
-        messages = get_messages(sqs_client, source_url, message_batch_size)
+        effective_limit = None
+        if message_limit is not None:
+            effective_limit = message_limit - processed_messages
+
+        effective_batch_size = (
+            message_batch_size
+            if effective_limit is None
+            else effective_limit
+            if effective_limit < message_batch_size
+            else message_batch_size
+        )
+
+        messages = get_messages(sqs_client, source_url, effective_batch_size)
+
         if not messages:
             break
 
         message_bodies = [message.body for message in messages]
         logger.info("Messages: %s", json.dumps(message_bodies, indent=4))
+        processed_messages += len(messages)
 
 
 def setup_logging(verbose: bool = False):
@@ -163,8 +198,12 @@ def run_from_cli():
         "-b",
         "--batch",
         help="The number of messages to request each iteration, 10 maximum",
+        type=int,
         required=False,
         default=10,
+    )
+    parser.add_argument(
+        "-l", "--limit", type=int, help="Limit on number of messages to operate", required=False
     )
     parser.add_argument(
         "-v",
@@ -179,11 +218,11 @@ def run_from_cli():
     else:
         setup_logging()
     if args.poll:
-        poll_messages(args.source, args.batch)
+        poll_messages(args.source, args.batch, args.limit)
     else:
         if not args.dest:
             parser.error("-d argument is required if not polling")
-        move_messages(args.source, args.dest, args.batch)
+        move_messages(args.source, args.dest, args.batch, args.limit)
 
 
 if __name__ == "__main__":
