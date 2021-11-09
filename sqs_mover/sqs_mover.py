@@ -154,7 +154,7 @@ def move_messages(
                     "Moved %d messages, approximately %s left", messages_moved, total_messages
                 )
             progress_bar.update(len(messages))
-        tqdm.write("Moved total %d message(s)" % messages_moved)
+    tqdm.write("Moved total %d message(s)" % messages_moved)
 
 
 def poll_messages(
