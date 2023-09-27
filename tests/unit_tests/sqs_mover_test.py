@@ -6,6 +6,7 @@ from sqs_mover.sqs_mover import (
     send_messages,
     delete_messages,
     move_messages,
+    copy_messages,
     Message,
 )
 
@@ -71,7 +72,7 @@ def test_get_messages_zero_batch_size():
     assert messages == tuple()
 
 
-def test_send_messagse_sends_messages():
+def test_send_messages_sends_messages():
     sqs_client = Mock()
 
     sqs_client.send_message_batch.return_value = {}
@@ -85,7 +86,7 @@ def test_send_messagse_sends_messages():
     assert failed_messages == tuple()
 
 
-def test_send_messagse_returns_failed_messages():
+def test_send_messages_returns_failed_messages():
     sqs_client = Mock()
 
     sqs_client.send_message_batch.return_value = {"Failed": [{"MessageId": 2}]}
@@ -146,7 +147,7 @@ def test_move_messages_moves_in_bulks(get_queue_url, get_messages, send_messages
     get_queue_url.side_effect = _get_queue_url
     get_messages.side_effect = batches
 
-    move_messages("source", "dest", 1, sqs_client=sqs_client)
+    move_messages("source", ["dest"], 1, sqs_client=sqs_client)
 
     assert get_queue_url.call_args_list == [call(sqs_client, "source"), call(sqs_client, "dest")]
     assert get_messages.call_args_list == [call(sqs_client, "http://source", 1)] * 3
@@ -182,7 +183,7 @@ def test_move_messages_moves_in_bulks_with_limit(
     }[queue_name]
     get_messages.side_effect = batches
 
-    move_messages("source", "dest", message_batch_size=2, message_limit=7, sqs_client=sqs_client)
+    move_messages("source", ["dest"], message_batch_size=2, message_limit=7, sqs_client=sqs_client)
 
     assert get_queue_url.call_args_list == [call(sqs_client, "source"), call(sqs_client, "dest")]
     assert get_messages.call_args_list == [
@@ -204,3 +205,76 @@ def test_move_messages_moves_in_bulks_with_limit(
         call(sqs_client, "http://source", batches[2]),
         call(sqs_client, "http://source", batches[3]),
     ]
+
+
+
+@patch("sqs_mover.sqs_mover.get_approximate_queue_size", Mock(return_value=20))
+@patch("sqs_mover.sqs_mover.delete_messages")
+@patch("sqs_mover.sqs_mover.send_messages")
+@patch("sqs_mover.sqs_mover.get_messages")
+@patch("sqs_mover.sqs_mover.get_queue_url")
+def test_copy_messages_copies_in_bulks(get_queue_url, get_messages, send_messages, delete_messages):
+    sqs_client = Mock()
+
+    messages = [Message(i, str(i), {}, str(i)) for i in range(10)]
+    batches = [messages[:5], messages[5:], tuple()]
+
+    send_messages.side_effect = [tuple(), tuple()]
+    delete_messages.side_effect = [tuple(), tuple()]
+
+    def _get_queue_url(_, queue_name):
+        return {"source": "http://source", "dest": "http://dest"}[queue_name]
+
+    get_queue_url.side_effect = _get_queue_url
+    get_messages.side_effect = batches
+
+    copy_messages("source", ["dest"], 1, sqs_client=sqs_client)
+
+    assert get_queue_url.call_args_list == [call(sqs_client, "source"), call(sqs_client, "dest")]
+    assert get_messages.call_args_list == [call(sqs_client, "http://source", 1)] * 3
+    assert send_messages.call_args_list == [
+        call(sqs_client, "http://dest", batches[0]),
+        call(sqs_client, "http://dest", batches[1]),
+    ]
+    assert not delete_messages.called
+
+
+@patch("sqs_mover.sqs_mover.get_approximate_queue_size", Mock(return_value=20))
+@patch("sqs_mover.sqs_mover.delete_messages")
+@patch("sqs_mover.sqs_mover.send_messages")
+@patch("sqs_mover.sqs_mover.get_messages")
+@patch("sqs_mover.sqs_mover.get_queue_url")
+def test_copy_messages_moves_in_bulks_with_limit(
+        get_queue_url, get_messages, send_messages, delete_messages
+):
+    sqs_client = Mock()
+
+    messages = [Message(i, str(i), {}, str(i)) for i in range(10)]
+    batches = [messages[:2], messages[3:5], messages[5:7], messages[7:], tuple()]
+
+    send_messages.side_effect = [tuple(), tuple(), tuple(), tuple()]
+    delete_messages.side_effect = [tuple(), tuple(), tuple(), tuple()]
+
+    get_queue_url.side_effect = lambda _, queue_name: {
+        "source": "http://source",
+        "dest": "http://dest",
+    }[queue_name]
+    get_messages.side_effect = batches
+
+    copy_messages("source", ["dest"], message_batch_size=2, message_limit=7, sqs_client=sqs_client)
+
+    assert get_queue_url.call_args_list == [call(sqs_client, "source"), call(sqs_client, "dest")]
+    assert get_messages.call_args_list == [
+        call(sqs_client, "http://source", 2),
+        call(sqs_client, "http://source", 2),
+        call(sqs_client, "http://source", 2),
+        call(sqs_client, "http://source", 1),
+        call(sqs_client, "http://source", -2),
+    ]
+    assert send_messages.call_args_list == [
+        call(sqs_client, "http://dest", batches[0]),
+        call(sqs_client, "http://dest", batches[1]),
+        call(sqs_client, "http://dest", batches[2]),
+        call(sqs_client, "http://dest", batches[3]),
+    ]
+    assert not delete_messages.called

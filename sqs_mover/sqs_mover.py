@@ -1,8 +1,10 @@
 import logging
 import argparse
+import os
+
 import boto3
 
-from typing import Dict, Tuple, NamedTuple, Optional
+from typing import List, Dict, Tuple, NamedTuple, Optional
 
 from tqdm import tqdm
 
@@ -16,6 +18,15 @@ class Message(NamedTuple):
     attributes: Optional[Dict]
     receipt_handle: str
 
+class Input(NamedTuple):
+    region: str
+    source_queue_name: str
+    destination_queue_name: List[str]
+    message_batch_size: int
+    verbose: bool
+    poll_message_path: str
+    is_copy: bool
+    message_limit: int
 
 Messages = Tuple[Message, ...]
 
@@ -93,7 +104,7 @@ def get_approximate_queue_size(sqs_client, queue_url: str) -> int:
 
 def move_messages(
         source_queue_name: str,
-        dest_queue_name: str,
+        dest_queue_names: List[str],
         message_batch_size: int,
         message_limit=None,
         sqs_client=None,
@@ -101,7 +112,7 @@ def move_messages(
     sqs_client = sqs_client or boto3.client("sqs")
 
     source_url = get_queue_url(sqs_client, source_queue_name)
-    dest_url = get_queue_url(sqs_client, dest_queue_name)
+    dest_urls = [get_queue_url(sqs_client, dest_queue_name) for dest_queue_name in dest_queue_names]
 
     total_messages = get_approximate_queue_size(sqs_client, source_url)
 
@@ -116,7 +127,7 @@ def move_messages(
         tqdm.write("Approximately %s messages are in %s" % (total_messages, source_queue_name))
         tqdm.write(
             "Moving %s messages from %s to %s"
-            % (messages_to_poll, source_queue_name, dest_queue_name)
+            % (messages_to_poll, source_queue_name, dest_urls)
         )
         while True:
             effective_limit = None
@@ -136,10 +147,10 @@ def move_messages(
                 break
 
             logger.debug("Received messages: %s", messages)
-
-            failed_sends = send_messages(sqs_client, dest_url, messages)
-            if failed_sends:
-                return
+            for dest_url in dest_urls:
+                failed_sends = send_messages(sqs_client, dest_url, messages)
+                if failed_sends:
+                    return
 
             failed_deletions = delete_messages(sqs_client, source_url, messages)
             if failed_deletions:
@@ -155,6 +166,67 @@ def move_messages(
                 )
             progress_bar.update(len(messages))
     tqdm.write("Moved total %d message(s)" % messages_moved)
+
+def copy_messages(
+        source_queue_name: str,
+        dest_queue_names: List[str],
+        message_batch_size: int,
+        message_limit=None,
+        sqs_client=None,
+):
+    sqs_client = sqs_client or boto3.client("sqs")
+
+    source_url = get_queue_url(sqs_client, source_queue_name)
+    dest_urls = [get_queue_url(sqs_client, dest_queue_name) for dest_queue_name in dest_queue_names]
+
+    total_messages = get_approximate_queue_size(sqs_client, source_url)
+
+    messages = None
+    messages_moved = 0
+    # In every 10 iteration, check for messages left in queue and log.
+    iteration = 0
+    messages_to_poll = (
+        total_messages if message_limit is None else min(message_limit, total_messages)
+    )
+    with tqdm(total=messages_to_poll, colour=CLI_COLOR, unit="msg", ncols=120, disable=DISABLE_TQDM) as progress_bar:
+        tqdm.write("Approximately %s messages are in %s" % (total_messages, source_queue_name))
+        tqdm.write(
+            "Copying %s messages from %s to %s"
+            % (messages_to_poll, source_queue_name, dest_urls)
+        )
+        while True:
+            effective_limit = None
+            if message_limit is not None:
+                effective_limit = message_limit - messages_moved
+
+            effective_batch_size = (
+                message_batch_size
+                if effective_limit is None
+                else effective_limit
+                if effective_limit < message_batch_size
+                else message_batch_size
+            )
+
+            messages = get_messages(sqs_client, source_url, effective_batch_size)
+            if not messages:
+                break
+
+            logger.debug("Received messages: %s", messages)
+            for dest_url in dest_urls:
+                failed_sends = send_messages(sqs_client, dest_url, messages)
+                if failed_sends:
+                    return
+
+            iteration += 1
+            messages_moved += len(messages)
+
+            if iteration % 10 == 0:
+                total_messages = get_approximate_queue_size(sqs_client, source_url)
+                logger.debug(
+                    "Copied %d messages, approximately %s left", messages_moved, total_messages
+                )
+            progress_bar.update(len(messages))
+    tqdm.write("Copied total %d message(s)" % messages_moved)
 
 
 def poll_messages(
@@ -225,8 +297,49 @@ def range_limited_int_type(min_value: int, max_value: int):
     return _range_limited_int_type
 
 
+def main(input_value: Input):
+    if input_value.verbose:
+        setup_logging(verbose=True)
+        global DISABLE_TQDM
+        DISABLE_TQDM = True
+    else:
+        setup_logging()
+
+    sqs_client = boto3.client("sqs", region_name=input_value.region)
+
+    if input_value.poll_message_path:
+        poll_messages(
+            source_queue_name=input_value.source_queue_name,
+            output_file_name=input_value.poll_message_path,
+            message_batch_size=input_value.message_batch_size,
+            message_limit=input_value.message_limit,
+            sqs_client=sqs_client
+        )
+    elif input_value.is_copy:
+        if not input_value.destination_queue_name:
+            logging.error("-d argument is required if not polling")
+            exit(1)
+        copy_messages(
+            source_queue_name=input_value.source_queue_name,
+            dest_queue_names=input_value.destination_queue_name,
+            message_batch_size=input_value.message_batch_size,
+            message_limit=input_value.message_limit,
+            sqs_client=sqs_client,
+        )
+    else:
+        if not input_value.destination_queue_name:
+            logging.error("-d argument is required if not polling")
+            exit(1)
+        move_messages(
+            source_queue_name=input_value.source_queue_name,
+            dest_queue_names=input_value.destination_queue_name,
+            message_batch_size=input_value.message_batch_size,
+            message_limit=input_value.message_limit,
+            sqs_client=sqs_client,
+        )
+
 def run_from_cli():
-    parser = argparse.ArgumentParser(description="Move messages between SQS queues.")
+    parser = argparse.ArgumentParser(description="Move, Copy or Poll messages from SQS queue.")
     parser.add_argument(
         "-p",
         "--poll",
@@ -235,8 +348,16 @@ def run_from_cli():
         type=str,
         required=False,
     )
+    parser.add_argument(
+        "-c",
+        "--copy",
+        help="Copy messages from the source queue to destination queue without moving.",
+        action="store_true",
+    )
     parser.add_argument("-s", "--source", help="Source queue name", required=True)
-    parser.add_argument("-d", "--dest", help="Destination queue name", required=False)
+    parser.add_argument(
+        "-d", "--dest", help="Destination queue names", type=str, nargs="*", required=False
+    )
     parser.add_argument(
         "-b",
         "--batch",
@@ -255,25 +376,31 @@ def run_from_cli():
         action='store_true',
         required=False
     )
+    parser.add_argument(
+        "-r",
+        "--region",
+        help="AWS region where queues are located",
+        required=False,
+        default=os.environ.get("AWS_REGION"),
+    )
 
     args = parser.parse_args()
-    if args.verbose:
-        setup_logging(verbose=True)
-        global DISABLE_TQDM
-        DISABLE_TQDM = True
-    else:
-        setup_logging()
-    if args.poll:
-        poll_messages(
+
+    if (args.copy or args.dest) and not args.dest:
+        parser.error("-d argument is required if not polling")
+
+    main(
+        Input(
+            region=args.region,
             source_queue_name=args.source,
-            output_file_name=args.poll,
+            destination_queue_name=args.dest,
             message_batch_size=args.batch,
+            verbose=args.verbose,
+            poll_message_path=args.poll,
+            is_copy=args.copy,
             message_limit=args.limit,
         )
-    else:
-        if not args.dest:
-            parser.error("-d argument is required if not polling")
-        move_messages(args.source, args.dest, args.batch, args.limit)
+    )
 
 
 if __name__ == "__main__":
