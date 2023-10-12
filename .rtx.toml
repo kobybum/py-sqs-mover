@@ -1,0 +1,2 @@
+[tools]
+python = { version='3.8', virtualenv='.venv' }
